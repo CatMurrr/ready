@@ -63,8 +63,7 @@ async def get_user(uid):
     return rows[0]
 
 async def set_channel(type_name, cid):
-    await db_exec("INSERT OR REPLACE INTO config(type,channel) VALUES(?,?)",
-                  (type_name, cid))
+    await db_exec("INSERT OR REPLACE INTO config(type,channel) VALUES(?,?)", (type_name, cid))
 
 async def get_channel(type_name):
     r = await db_fetch("SELECT channel FROM config WHERE type=?", (type_name,))
@@ -136,13 +135,20 @@ async def on_message(msg):
         await msg.channel.send("Дух запомнил это место.")
     await bot.process_commands(msg)
 
+# ---------------- HELPER: REQUIRE CHANNEL ----------------
+async def require_channel(inter, type_name):
+    chan_id = await get_channel(type_name)
+    if chan_id and inter.channel.id != chan_id:
+        await inter.response.send_message(f"Дух молчит. Эта команда доступна только в <#{chan_id}>.", ephemeral=True)
+        return False
+    return True
+
 # ---------------- SAFE COMMANDS ----------------
 @bot.tree.command(guild=GUILD)
 async def принюхаться(inter: discord.Interaction):
     gain = random.randint(1,15)
     u = await get_user(inter.user.id)
-    await db_exec("UPDATE users SET orientation=? WHERE id=?",
-                  (cap300(u[2]+gain), inter.user.id))
+    await db_exec("UPDATE users SET orientation=? WHERE id=?", (cap300(u[2]+gain), inter.user.id))
 
     names = []
     async for m in inter.channel.history(limit=20):
@@ -150,17 +156,13 @@ async def принюхаться(inter: discord.Interaction):
             names.append(m.author.display_name)
     names = list(dict.fromkeys(names))[:5]
 
-    await inter.response.send_message(
-        f"{inter.user.mention} втягивает воздух. "
-        f"В памяти — {', '.join(names)}. (+{gain} ориентирования)"
-    )
+    await inter.response.send_message(f"{inter.user.mention} втягивает воздух. В памяти — {', '.join(names)}. (+{gain} ориентирования)")
 
 @bot.tree.command(guild=GUILD)
 async def прислушаться(inter: discord.Interaction):
     gain = random.randint(1,15)
     u = await get_user(inter.user.id)
-    await db_exec("UPDATE users SET orientation=? WHERE id=?",
-                  (cap300(u[2]+gain), inter.user.id))
+    await db_exec("UPDATE users SET orientation=? WHERE id=?", (cap300(u[2]+gain), inter.user.id))
 
     msgs = []
     async for m in inter.channel.history(limit=30):
@@ -168,82 +170,52 @@ async def прислушаться(inter: discord.Interaction):
             msgs.append(m.content)
     sample = random.choice(msgs)[:60] if msgs else "тишина..."
 
-    await inter.response.send_message(
-        f"{inter.user.mention} замирает. В шорохах слышится: «{sample}» (+{gain})"
-    )
+    await inter.response.send_message(f"{inter.user.mention} замирает. В шорохах слышится: «{sample}» (+{gain})")
 
 @bot.tree.command(guild=GUILD)
 async def гоняться_за_листьями(inter: discord.Interaction):
     gain = random.randint(1,15)
     u = await get_user(inter.user.id)
-    await db_exec("UPDATE users SET strength=? WHERE id=?",
-                  (cap300(u[1]+gain), inter.user.id))
-    await inter.response.send_message(
-        f"{inter.user.mention} {g(inter.user,'разогнался','разогналась')} по поляне. (+{gain} силы)"
-    )
+    await db_exec("UPDATE users SET strength=? WHERE id=?", (cap300(u[1]+gain), inter.user.id))
+    await inter.response.send_message(f"{inter.user.mention} {g(inter.user,'разогнался','разогналась')} по поляне. (+{gain} силы)")
 
 @bot.tree.command(guild=GUILD)
 async def ловить_шмеля(inter: discord.Interaction):
     gain = random.randint(1,15)
     u = await get_user(inter.user.id)
-    await db_exec("UPDATE users SET strength=?, mood=? WHERE id=?",
-                  (cap300(u[1]+gain), cap100(u[6]+10), inter.user.id))
-    await inter.response.send_message(
-        f"{inter.user.mention} ловко щёлкает лапой. (+{gain} силы, +10% настроения)"
-    )
+    await db_exec("UPDATE users SET strength=?, mood=? WHERE id=?", (cap300(u[1]+gain), cap100(u[6]+10), inter.user.id))
+    await inter.response.send_message(f"{inter.user.mention} ловко щёлкает лапой. (+{gain} силы, +10% настроения)")
 
 # ---------------- KITTENS ----------------
-def kittens_only():
-    async def predicate(inter):
-        return inter.channel.id == await get_channel("kittens")
-    return predicate
-
 @bot.tree.command(guild=GUILD)
 async def попить_молока(inter: discord.Interaction):
-    if inter.channel.id != await get_channel("kittens"):
-        return await inter.response.send_message("Дух молчит.", ephemeral=True)
+    if not await require_channel(inter, "kittens"): return
     u = await get_user(inter.user.id)
-    await db_exec("UPDATE users SET hunger=? WHERE id=?",
-                  (cap100(u[4]+20), inter.user.id))
-    await inter.response.send_message(
-        f"{inter.user.mention} лакает молоко. (+20% сытости)"
-    )
+    await db_exec("UPDATE users SET hunger=? WHERE id=?", (cap100(u[4]+20), inter.user.id))
+    await inter.response.send_message(f"{inter.user.mention} лакает молоко. (+20% сытости)")
 
 @bot.tree.command(guild=GUILD)
 async def кусать_хвостик_роженицы(inter: discord.Interaction):
-    if inter.channel.id != await get_channel("kittens"):
-        return await inter.response.send_message("Дух молчит.", ephemeral=True)
-
-    mothers = [m for m in inter.guild.members
-               if any(r.name == ROLE_MOTHER for r in m.roles)]
+    if not await require_channel(inter, "kittens"): return
+    mothers = [m for m in inter.guild.members if any(r.name == ROLE_MOTHER for r in m.roles)]
     if not mothers:
         return await inter.response.send_message("Рожениц рядом нет.")
-
     target = random.choice(mothers)
     gain = random.randint(1,5)
     u = await get_user(inter.user.id)
-    await db_exec("UPDATE users SET strength=?, mood=? WHERE id=?",
-                  (cap300(u[1]+gain), cap100(u[6]+10), inter.user.id))
-
-    await inter.response.send_message(
-        f"{inter.user.mention} внезапно кусает за хвост {target.mention}! (+{gain} силы)"
-    )
+    await db_exec("UPDATE users SET strength=?, mood=? WHERE id=?", (cap300(u[1]+gain), cap100(u[6]+10), inter.user.id))
+    await inter.response.send_message(f"{inter.user.mention} внезапно кусает за хвост {target.mention}! (+{gain} силы)")
 
 @bot.tree.command(guild=GUILD)
 async def поваляться_на_подстилке(inter: discord.Interaction):
-    if inter.channel.id != await get_channel("kittens"):
-        return await inter.response.send_message("Дух молчит.", ephemeral=True)
+    if not await require_channel(inter, "kittens"): return
     u = await get_user(inter.user.id)
-    await db_exec("UPDATE users SET mood=? WHERE id=?",
-                  (cap100(u[6]+10), inter.user.id))
-    await inter.response.send_message(
-        f"{inter.user.mention} уютно устраивается. (+10% настроения)"
-    )
+    await db_exec("UPDATE users SET mood=? WHERE id=?", (cap100(u[6]+10), inter.user.id))
+    await inter.response.send_message(f"{inter.user.mention} уютно устраивается. (+10% настроения)")
 
 # ---------------- HUNT ----------------
 async def hunt_attempt(inter, chance, success_range, fail_range, mood_change=0):
-    if inter.channel.id != await get_channel("hunt"):
-        return await inter.response.send_message("Дух молчит.", ephemeral=True)
+    if not await require_channel(inter, "hunt"): return
 
     prey = await db_fetch("SELECT prey FROM hunt WHERE rowid=1")
     if prey[0][0] <= 0:
@@ -262,12 +234,8 @@ async def hunt_attempt(inter, chance, success_range, fail_range, mood_change=0):
 
     new_strength = cap300(u[1]+gain if u[1]<300 else u[1])
     new_mood = cap100(u[6]+mood_change if success else u[6]-abs(mood_change))
-    await db_exec("UPDATE users SET strength=?, mood=? WHERE id=?",
-                  (new_strength, new_mood, inter.user.id))
-
-    await inter.response.send_message(
-        f"{inter.user.mention} {text} (+{gain} силы)"
-    )
+    await db_exec("UPDATE users SET strength=?, mood=? WHERE id=?", (new_strength, new_mood, inter.user.id))
+    await inter.response.send_message(f"{inter.user.mention} {text} (+{gain} силы)")
 
 @bot.tree.command(guild=GUILD)
 async def сделать_рывок(inter: discord.Interaction):
@@ -281,81 +249,38 @@ async def выследить_добычу(inter: discord.Interaction):
 async def наступить_на_ветку(inter: discord.Interaction):
     await hunt_attempt(inter,5,(5,10),(0,3),-10)
 
-# ---------------- HERBS ----------------
-@bot.tree.command(guild=GUILD)
-async def собрать_травы(inter: discord.Interaction):
-    if inter.channel.id != await get_channel("hunt"):
-        return await inter.response.send_message("Дух молчит.", ephemeral=True)
-
-    herbs = await db_fetch("SELECT available FROM herbs WHERE rowid=1")
-    if herbs[0][0] <= 0:
-        return await inter.response.send_message("Трав больше нет.")
-
-    u = await get_user(inter.user.id)
-    fail_chance = 60 if u[3] < 50 else 30
-
-    if random.randint(1,100) <= fail_chance:
-        await inter.response.send_message("Ростки испорчены...")
-    else:
-        gain = random.randint(15,25)
-        await db_exec("UPDATE users SET medicine=? WHERE id=?",
-                      (cap300(u[3]+gain), inter.user.id))
-        await db_exec("UPDATE herbs SET available=available-1 WHERE rowid=1")
-        await inter.response.send_message(
-            f"{inter.user.mention} аккуратно собирает травы. (+{gain} медицины)"
-        )
-
 # ---------------- CAMP ----------------
 @bot.tree.command(guild=GUILD)
 async def собрание(inter: discord.Interaction):
-    if inter.channel.id != await get_channel("camp"):
-        return await inter.response.send_message("Дух молчит.", ephemeral=True)
+    if not await require_channel(inter, "camp"): return
     await inter.response.send_message("@everyone Начинается собрание племени.")
 
 @bot.tree.command(guild=GUILD)
 async def взять_лакомство(inter: discord.Interaction):
-    if inter.channel.id != await get_channel("camp"):
-        return await inter.response.send_message("Дух молчит.", ephemeral=True)
+    if not await require_channel(inter, "camp"): return
     u = await get_user(inter.user.id)
-    await db_exec("UPDATE users SET hunger=? WHERE id=?",
-                  (cap100(u[4]+30), inter.user.id))
-    await inter.response.send_message(
-        f"{inter.user.mention} перекусывает. (+30% сытости)"
-    )
+    await db_exec("UPDATE users SET hunger=? WHERE id=?", (cap100(u[4]+30), inter.user.id))
+    await inter.response.send_message(f"{inter.user.mention} перекусывает. (+30% сытости)")
 
 @bot.tree.command(guild=GUILD)
 async def попить_воды(inter: discord.Interaction):
-    if inter.channel.id != await get_channel("camp"):
-        return await inter.response.send_message("Дух молчит.", ephemeral=True)
+    if not await require_channel(inter, "camp"): return
     u = await get_user(inter.user.id)
-    await db_exec("UPDATE users SET thirst=? WHERE id=?",
-                  (cap100(u[5]+40), inter.user.id))
-    await inter.response.send_message(
-        f"{inter.user.mention} утоляет жажду. (+40%)"
-    )
+    await db_exec("UPDATE users SET thirst=? WHERE id=?", (cap100(u[5]+40), inter.user.id))
+    await inter.response.send_message(f"{inter.user.mention} утоляет жажду. (+40%)")
 
 # ---------------- STATUS ----------------
 @bot.tree.command(guild=GUILD)
 async def состояние(inter: discord.Interaction):
-    if inter.channel.id != await get_channel("status"):
-        return await inter.response.send_message("Дух молчит.", ephemeral=True)
+    if not await require_channel(inter, "status"): return
     u = await get_user(inter.user.id)
-    await inter.response.send_message(
-        f"{inter.user.mention}\n"
-        f"Сытость: {u[4]}%\nЖажда: {u[5]}%\nНастроение: {u[6]}%"
-    )
+    await inter.response.send_message(f"{inter.user.mention}\nСытость: {u[4]}%\nЖажда: {u[5]}%\nНастроение: {u[6]}%")
 
 @bot.tree.command(guild=GUILD)
 async def скиллы(inter: discord.Interaction):
-    if inter.channel.id != await get_channel("status"):
-        return await inter.response.send_message("Дух молчит.", ephemeral=True)
+    if not await require_channel(inter, "status"): return
     u = await get_user(inter.user.id)
-    await inter.response.send_message(
-        f"{inter.user.mention}\n"
-        f"Сила: {u[1]}/300\n"
-        f"Ориентирование: {u[2]}/300\n"
-        f"Медицина: {u[3]}/300"
-    )
+    await inter.response.send_message(f"{inter.user.mention}\nСила: {u[1]}/300\nОриентирование: {u[2]}/300\nМедицина: {u[3]}/300")
 
 # ---------------- SPAWN TASKS ----------------
 async def spawn_prey():
