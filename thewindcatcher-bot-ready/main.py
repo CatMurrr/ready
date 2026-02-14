@@ -420,12 +420,13 @@ class MyBot(commands.Bot):
 
 # ---------------- Создание бота ----------------
 bot = MyBot(command_prefix="!", intents=intents)
-
 # ---------------- Запуск бота ----------------
 @bot.event
 async def on_ready():
     await init_db()
     print(f"Бот {bot.user} онлайн на сервере {GUILD_ID}")
-    await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
 
-bot.run(TOKEN)
+    # ⚠ Очистка старых команд на сервере и синхронизация новых RP-команд
+    await bot.tree.clear_commands(guild=discord.Object(id=GUILD_ID))
+    await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+    print("RP-команды синхронизированы и старые команды удалены")
