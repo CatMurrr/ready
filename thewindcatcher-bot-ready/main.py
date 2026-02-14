@@ -18,7 +18,7 @@ def home():
 def run_flask():
     app.run(host="0.0.0.0", port=8080)
 
-threading.Thread(target=run_flask).start()
+threading.Thread(target=run_flask, daemon=True).start()  # daemon=True, чтобы поток завершался вместе с ботом
 
 # ---------------- Discord ----------------
 TOKEN = os.getenv("TOKEN")
@@ -59,8 +59,10 @@ async def init_db():
             last_spawn TEXT
         )
         """)
-        await db.execute("INSERT OR IGNORE INTO hunt(rowid,prey,last_spawn) VALUES(1,6,?)",
-                         (datetime.datetime.utcnow().isoformat(),))
+        await db.execute(
+            "INSERT OR IGNORE INTO hunt(rowid,prey,last_spawn) VALUES(1,6,?)",
+            (datetime.datetime.utcnow().isoformat(),)
+        )
         await db.commit()
 
 async def get_user(uid):
@@ -82,7 +84,7 @@ async def update(uid, field, value):
 def cap(v): return max(0, min(300, v))
 def percent(v): return max(0, min(100, v))
 def gender(member, male, female):
-    return female if any(r.name==ROLE_FEMALE for r in member.roles) else male
+    return female if any(r.name == ROLE_FEMALE for r in member.roles) else male
 
 async def check_channel(interaction, type_name):
     async with aiosqlite.connect(DB_FILE) as db:
@@ -93,7 +95,7 @@ async def check_channel(interaction, type_name):
         return False
     return True
 
-# ---------------- Command: setup channels ----------------
+# ---------------- Setup channels ----------------
 @bot.event
 async def on_message(message):
     if message.guild and message.guild.id == GUILD_ID:
@@ -103,7 +105,10 @@ async def on_message(message):
                 key = parts[1]
                 ch = message.channel_mentions[0]
                 async with aiosqlite.connect(DB_FILE) as db:
-                    await db.execute("INSERT OR REPLACE INTO config(type,channel) VALUES(?,?)", (key,ch.id))
+                    await db.execute(
+                        "INSERT OR REPLACE INTO config(type,channel) VALUES(?,?)",
+                        (key, ch.id)
+                    )
                     await db.commit()
                 await message.channel.send(f"Дух запомнил это место для: {key}")
     await bot.process_commands(message)
@@ -112,8 +117,8 @@ async def on_message(message):
 @bot.tree.command()
 async def принюхаться(inter: discord.Interaction):
     user = await get_user(inter.user.id)
-    gain = random.randint(1,15)
-    await update(inter.user.id,"orientation",cap(user[2]+gain))
+    gain = random.randint(1, 15)
+    await update(inter.user.id, "orientation", cap(user[2] + gain))
     authors = []
     async for msg in inter.channel.history(limit=100):
         if msg.author.bot is False and msg.author not in authors:
@@ -121,48 +126,60 @@ async def принюхаться(inter: discord.Interaction):
         if len(authors) >= 5:
             break
     names = ", ".join(a.display_name for a in authors)
-    await inter.response.send_message(f"{inter.user.mention} втягивает воздух. Следы ведут к: {names}. (+{gain} ориентирования)")
+    await inter.response.send_message(
+        f"{inter.user.mention} втягивает воздух. Следы ведут к: {names}. (+{gain} ориентирования)"
+    )
 
 @bot.tree.command()
 async def гоняться_за_листьями(inter: discord.Interaction):
     user = await get_user(inter.user.id)
-    gain = random.randint(1,15)
-    await update(inter.user.id,"strength",cap(user[1]+gain))
-    await inter.response.send_message(f"{inter.user.mention} носится за листьями. (+{gain} силы)")
+    gain = random.randint(1, 15)
+    await update(inter.user.id, "strength", cap(user[1] + gain))
+    await inter.response.send_message(
+        f"{inter.user.mention} носится за листьями. (+{gain} силы)"
+    )
 
 @bot.tree.command()
 async def ловить_шмеля(inter: discord.Interaction):
     user = await get_user(inter.user.id)
-    gain = random.randint(1,15)
-    await update(inter.user.id,"strength",cap(user[1]+gain))
-    await update(inter.user.id,"mood",percent(user[6]+10))
-    await inter.response.send_message(f"{inter.user.mention} ловит шмеля. (+{gain} силы, +10% настроения)")
+    gain = random.randint(1, 15)
+    await update(inter.user.id, "strength", cap(user[1] + gain))
+    await update(inter.user.id, "mood", percent(user[6] + 10))
+    await inter.response.send_message(
+        f"{inter.user.mention} ловит шмеля. (+{gain} силы, +10% настроения)"
+    )
 
-# ---------------- Котята ----------------
 @bot.tree.command()
 async def попить_молока(inter: discord.Interaction):
-    if not await check_channel(inter,"котята"): return
+    if not await check_channel(inter, "котята"): return
     user = await get_user(inter.user.id)
-    await update(inter.user.id,"hunger",percent(user[4]+20))
-    await inter.response.send_message(f"{inter.user.mention} лаком{gender(inter.user,'ится','ится')} тёплым молоком. (+20% сытости)")
+    await update(inter.user.id, "hunger", percent(user[4] + 20))
+    await inter.response.send_message(
+        f"{inter.user.mention} лаком{gender(inter.user,'ится','ится')} тёплым молоком. (+20% сытости)"
+    )
 
 @bot.tree.command()
 async def кусать_хвостик_роженицы(inter: discord.Interaction):
-    if not await check_channel(inter,"котята"): return
+    if not await check_channel(inter, "котята"): return
     mothers = [m for m in inter.guild.members if any(r.name==ROLE_MOTHER for r in m.roles)]
     if not mothers:
         await inter.response.send_message("В лагере нет рожениц...")
         return
     target = random.choice(mothers)
-    gain = random.randint(1,5)
+    gain = random.randint(1, 5)
     user = await get_user(inter.user.id)
-    await update(inter.user.id,"strength",cap(user[1]+gain))
-    await update(inter.user.id,"mood",percent(user[6]+10))
-    await inter.response.send_message(f"{inter.user.mention} кусает за хвост {target.mention}. (+{gain} силы, +10% настроения)")
+    await update(inter.user.id, "strength", cap(user[1] + gain))
+    await update(inter.user.id, "mood", percent(user[6] + 10))
+    await inter.response.send_message(
+        f"{inter.user.mention} кусает за хвост {target.mention}. (+{gain} силы, +10% настроения)"
+    )
 
-# ---------------- Запуск бота ----------------
+# ---------------- Bot events ----------------
 @bot.event
 async def on_ready():
     await init_db()
     print(f"Бот {bot.user} онлайн")
     await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+
+# ---------------- Run bot ----------------
+bot.run(TOKEN)
