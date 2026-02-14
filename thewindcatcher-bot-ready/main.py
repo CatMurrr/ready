@@ -34,14 +34,7 @@ intents.guilds = True
 intents.members = True
 
 # ---------------- Бот ----------------
-class MyBot(commands.Bot):
-    def __init__(self):
-        super().__init__(command_prefix="!", intents=intents)
-
-    async def setup_hook(self):
-        self.loop.create_task(monitor_status())
-
-bot = MyBot()
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ---------------- Database ----------------
 DB_FILE = "thewindcatcher.db"
@@ -111,8 +104,9 @@ async def check_channel(interaction, type_name):
         return False
     return True
 
-# ---------------- Безопасные команды (везде) ----------------
-@bot.tree.command()
+# ---------------- RP-команды ----------------
+# Безопасные команды
+@bot.tree.command(guild=discord.Object(id=GUILD_ID))
 async def принюхаться(inter: discord.Interaction):
     user = await get_user(inter.user.id)
     gain = random.randint(1, 15)
@@ -128,7 +122,7 @@ async def принюхаться(inter: discord.Interaction):
         f"{inter.user.mention} втягивает воздух. Следы ведут к: {names}. (+{gain} ориентирования)"
     )
 
-@bot.tree.command()
+@bot.tree.command(guild=discord.Object(id=GUILD_ID))
 async def прислушаться(inter: discord.Interaction):
     user = await get_user(inter.user.id)
     gain = random.randint(1, 15)
@@ -146,7 +140,7 @@ async def прислушаться(inter: discord.Interaction):
         f"{inter.user.mention} прислушивается и слышит: «{text}». (+{gain} ориентирования)"
     )
 
-@bot.tree.command()
+@bot.tree.command(guild=discord.Object(id=GUILD_ID))
 async def гоняться_за_листьями(inter: discord.Interaction):
     user = await get_user(inter.user.id)
     gain = random.randint(1, 15)
@@ -155,7 +149,7 @@ async def гоняться_за_листьями(inter: discord.Interaction):
         f"{inter.user.mention} носится за листьями. (+{gain} силы)"
     )
 
-@bot.tree.command()
+@bot.tree.command(guild=discord.Object(id=GUILD_ID))
 async def ловить_шмеля(inter: discord.Interaction):
     user = await get_user(inter.user.id)
     gain = random.randint(1, 15)
@@ -166,59 +160,20 @@ async def ловить_шмеля(inter: discord.Interaction):
     )
 
 # ---------------- Котячьи команды ----------------
-@bot.tree.command()
+@bot.tree.command(guild=discord.Object(id=GUILD_ID))
 async def попить_молока(inter: discord.Interaction):
-    if not await check_channel(inter, "котята"):
-        return
+    if not await check_channel(inter, "котята"): return
     user = await get_user(inter.user.id)
     await update(inter.user.id, "hunger", percent(user[4]+20))
     await inter.response.send_message(
         f"{inter.user.mention} лаком{gender(inter.user,'ится','ится')} тёплым молоком. (+20% сытости)"
     )
 
-@bot.tree.command()
-async def кусать_хвостик_роженицы(inter: discord.Interaction):
-    if not await check_channel(inter, "котята"):
-        return
-    mothers = [m for m in inter.guild.members if any(r.name == ROLE_MOTHER for r in m.roles)]
-    if not mothers:
-        await inter.response.send_message("В лагере нет рожениц...")
-        return
-    target = random.choice(mothers)
-    gain = random.randint(1, 5)
-    user = await get_user(inter.user.id)
-    await update(inter.user.id, "strength", cap(user[1]+gain))
-    await update(inter.user.id, "mood", percent(user[6]+10))
-    await inter.response.send_message(
-        f"{inter.user.mention} кусает за хвост {target.mention}. (+{gain} силы, +10% настроения)"
-    )
-
-@bot.tree.command()
-async def поваляться_на_подстилке(inter: discord.Interaction):
-    if not await check_channel(inter, "котята"):
-        return
-    user = await get_user(inter.user.id)
-    await update(inter.user.id, "mood", percent(user[6]+10))
-    await inter.response.send_message(
-        f"{inter.user.mention} уютно повалялся на подстилке. (+10% настроения)"
-    )
-
 # ---------------- Охотничьи команды ----------------
-async def spawn_prey():
-    async with aiosqlite.connect(DB_FILE) as db:
-        async with db.execute("SELECT last_spawn, prey FROM hunt WHERE rowid=1") as cur:
-            row = await cur.fetchone()
-        last_spawn = datetime.datetime.fromisoformat(row[0])
-        prey = row[1]
-        now = datetime.datetime.utcnow()
-        if (now - last_spawn).total_seconds() >= 3600:  # каждый час
-            await db.execute("UPDATE hunt SET prey=?, last_spawn=? WHERE rowid=1", (6, now.isoformat()))
-            await db.commit()
-
-@bot.tree.command()
+# Сделать рывок
+@bot.tree.command(guild=discord.Object(id=GUILD_ID))
 async def сделать_рывок(inter: discord.Interaction):
     if not await check_channel(inter, "охота"): return
-    await spawn_prey()
     async with aiosqlite.connect(DB_FILE) as db:
         async with db.execute("SELECT prey FROM hunt WHERE rowid=1") as cur:
             prey_left = (await cur.fetchone())[0]
@@ -228,7 +183,7 @@ async def сделать_рывок(inter: discord.Interaction):
     if success:
         gain = random.randint(20,555)
         prey_left -= 1
-        await inter.response.send_message(f"{inter.user.mention} резко дергается вперед, шерсть вздыблена. Добыча не успевает моргнуть, как сильные лапы накрывают её. (+{gain} силы)")
+        await inter.response.send_message(f"{inter.user.mention} резко дергается вперед. (+{gain} силы)")
     else:
         gain = random.randint(0,10)
         await inter.response.send_message(f"{inter.user.mention} делает рывок, но добыча ускользает. (+{gain} силы)")
@@ -237,101 +192,17 @@ async def сделать_рывок(inter: discord.Interaction):
         await db.execute("UPDATE hunt SET prey=? WHERE rowid=1", (prey_left,))
         await db.commit()
 
-@bot.tree.command()
-async def выследить_добычу(inter: discord.Interaction):
-    if not await check_channel(inter, "охота"): return
-    await spawn_prey()
-    async with aiosqlite.connect(DB_FILE) as db:
-        async with db.execute("SELECT prey FROM hunt WHERE rowid=1") as cur:
-            prey_left = (await cur.fetchone())[0]
-    user = await get_user(inter.user.id)
-    chance = 40
-    success = random.randint(1,100) <= chance
-    if success:
-        gain = random.randint(15,25)
-        prey_left -= 1
-        await inter.response.send_message(f"{inter.user.mention} крадется тихо по лесу, добыча замечена. Лапы быстры, добыча поймана. (+{gain} силы)")
-    else:
-        gain = random.randint(0,10)
-        await inter.response.send_message(f"{inter.user.mention} выследил добычу, но она ушла. (+{gain} силы)")
-    await update(inter.user.id,"strength", cap(user[1]+gain))
-    async with aiosqlite.connect(DB_FILE) as db:
-        await db.execute("UPDATE hunt SET prey=? WHERE rowid=1", (prey_left,))
-        await db.commit()
-
-@bot.tree.command()
-async def наступить_на_ветку(inter: discord.Interaction):
-    if not await check_channel(inter, "охота"): return
-    await spawn_prey()
-    async with aiosqlite.connect(DB_FILE) as db:
-        async with db.execute("SELECT prey FROM hunt WHERE rowid=1") as cur:
-            prey_left = (await cur.fetchone())[0]
-    user = await get_user(inter.user.id)
-    chance = 5
-    success = random.randint(1,100) <= chance
-    if success:
-        gain = random.randint(5,10)
-        mood_change = 5
-        prey_left -= 1
-        await inter.response.send_message(f"{inter.user.mention} наступает на ветку, но успевает выкрутиться и поймать добычу! (+{gain} силы, +{mood_change}% настроения)")
-    else:
-        gain = random.randint(0,3)
-        mood_change = -10
-        await inter.response.send_message(f"{inter.user.mention} шумит на ветке, добыча ускользает. (+{gain} силы, {mood_change}% настроения)")
-    await update(inter.user.id,"strength", cap(user[1]+gain))
-    await update(inter.user.id,"mood", percent(user[6]+mood_change))
-    async with aiosqlite.connect(DB_FILE) as db:
-        await db.execute("UPDATE hunt SET prey=? WHERE rowid=1", (prey_left,))
-        await db.commit()
-
-@bot.tree.command()
-async def собрать_травы(inter: discord.Interaction):
-    if not await check_channel(inter, "охота"): return
-    user = await get_user(inter.user.id)
-    skill = user[3]
-    chance = 60 if skill < 15 else 100
-    success = random.randint(1,100) <= chance
-    if success:
-        gain = random.randint(15,25)
-        await update(inter.user.id,"medicine", cap(user[3]+gain))
-        await inter.response.send_message(f"{inter.user.mention} успешно собирает травы. (+{gain} мед.умения)")
-    else:
-        await inter.response.send_message(f"{inter.user.mention} пытается собрать травы, но испортил ростки.")
-
 # ---------------- Лагерь ----------------
-@bot.tree.command()
-async def собрание(inter: discord.Interaction):
-    if not await check_channel(inter, "лагерь"): return
-    await inter.response.send_message("@everyone Собрание племени начинается!")
-
-@bot.tree.command()
-async def взять_лакомство(inter: discord.Interaction):
-    if not await check_channel(inter, "лагерь"): return
-    user = await get_user(inter.user.id)
-    await update(inter.user.id,"hunger", percent(user[4]+30))
-    await inter.response.send_message(f"{inter.user.mention} съел лакомство. (+30% сытости)")
-
-@bot.tree.command()
-async def попить_воды(inter: discord.Interaction):
-    if not await check_channel(inter, "лагерь"): return
-    user = await get_user(inter.user.id)
-    await update(inter.user.id,"thirst", percent(user[5]+40))
-    await inter.response.send_message(f"{inter.user.mention} утолил жажду. (+40% воды)")
-
-@bot.tree.command()
+@bot.tree.command(guild=discord.Object(id=GUILD_ID))
 async def состояние(inter: discord.Interaction):
     if not await check_channel(inter, "состояние"): return
     user = await get_user(inter.user.id)
-    await inter.response.send_message(f"{inter.user.mention} — Состояние: Сила {user[1]}, Ориентирование {user[2]}, Медицина {user[3]}, Сытость {user[4]}%, Жажда {user[5]}%, Настроение {user[6]}%")
-
-@bot.tree.command()
-async def скиллы(inter: discord.Interaction):
-    if not await check_channel(inter, "состояние"): return
-    user = await get_user(inter.user.id)
-    await inter.response.send_message(f"{inter.user.mention} — Навыки: Сила {user[1]}, Ориентирование {user[2]}, Медицина {user[3]}")
+    await inter.response.send_message(
+        f"{inter.user.mention} — Состояние: Сила {user[1]}, Ориентирование {user[2]}, Медицина {user[3]}, Сытость {user[4]}%, Жажда {user[5]}%, Настроение {user[6]}%"
+    )
 
 # ---------------- Админ ----------------
-@bot.tree.command()
+@bot.tree.command(guild=discord.Object(id=GUILD_ID))
 async def навык(inter: discord.Interaction, target: discord.Member, amount: int, skill: str):
     if not await check_channel(inter, "секретик"): return
     user = await get_user(target.id)
@@ -343,19 +214,7 @@ async def навык(inter: discord.Interaction, target: discord.Member, amount:
     await update(target.id, skill_field, new_val)
     await inter.response.send_message(f"{target.display_name} — {skill_field} изменен на {new_val}")
 
-@bot.tree.command()
-async def admin_состояние(inter: discord.Interaction, target: discord.Member, amount: int, field: str):
-    if not await check_channel(inter, "секретик"): return
-    if field not in ["strength","orientation","medicine","hunger","thirst","mood"]:
-        await inter.response.send_message("Неизвестное поле.")
-        return
-    user = await get_user(target.id)
-    old_val = getattr(user, field,0)
-    new_val = max(0, min(300 if field in ["strength","orientation","medicine"] else 100, old_val + amount))
-    await update(target.id, field, new_val)
-    await inter.response.send_message(f"{target.display_name} — {field} изменено на {new_val}")
-
-# ---------------- Авто-пинг ----------------
+# ---------------- Мониторинг ----------------
 async def monitor_status():
     await bot.wait_until_ready()
     while not bot.is_closed():
@@ -376,32 +235,17 @@ async def monitor_status():
                     await channel.send(f"{user.mention} срочно нужно повысить параметры!")
         await asyncio.sleep(10800)
 
-async def monitor_status():
-    await bot.wait_until_ready()
-    while not bot.is_closed():
-        async with aiosqlite.connect(DB_FILE) as db:
-            async with db.execute("SELECT id,hunger,thirst,mood FROM users") as cur:
-                rows = await cur.fetchall()
-        for r in rows:
-            uid, hunger, thirst, mood = r
-            if hunger < 10 or thirst < 10 or mood < 10:
-                user = bot.get_user(uid)
-                channel = None
-                async with aiosqlite.connect(DB_FILE) as db:
-                    async with db.execute("SELECT channel FROM config WHERE type='состояние'") as cur:
-                        row = await cur.fetchone()
-                        if row: 
-                            channel = bot.get_channel(row[0])
-                if user and channel:
-                    await channel.send(f"{user.mention} срочно нужно повысить параметры!")
-        await asyncio.sleep(10800)  # каждые 3 часа
+bot.loop.create_task(monitor_status())
 
 # ---------------- Запуск ----------------
 @bot.event
 async def on_ready():
     await init_db()
     print(f"Бот {bot.user} онлайн на сервере {GUILD_ID}")
+
+    # ⚡ Очистка старых команд только на этом сервере
+    await bot.tree.clear_commands(guild=discord.Object(id=GUILD_ID))
     await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-    print("RP-команды синхронизированы")
+    print("RP-команды синхронизированы и старые команды удалены")
 
 bot.run(TOKEN)
