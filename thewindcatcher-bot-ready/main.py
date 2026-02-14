@@ -105,7 +105,7 @@ async def check_channel(interaction, type_name):
         return False
     return True
 
-# ---------------- Ког для настройки каналов ----------------
+# ---------------- Cog для настройки каналов ----------------
 class ChannelSetup(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -206,6 +206,47 @@ class CatCommands(commands.Cog):
         await update(inter.user.id, "mood", percent(user[6]+10))
         await inter.response.send_message(f"{inter.user.mention} уютно повалялся на подстилке. (+10% настроения)")
 
+# ---------------- Охота ----------------
+class HuntCommands(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    async def spawn_prey(self):
+        async with aiosqlite.connect(DB_FILE) as db:
+            async with db.execute("SELECT last_spawn, prey FROM hunt WHERE rowid=1") as cur:
+                row = await cur.fetchone()
+            last_spawn = datetime.datetime.fromisoformat(row[0])
+            prey = row[1]
+            now = datetime.datetime.utcnow()
+            if (now - last_spawn).total_seconds() >= 3600:
+                await db.execute("UPDATE hunt SET prey=?, last_spawn=? WHERE rowid=1", (6, now.isoformat()))
+                await db.commit()
+
+    @app_commands.command(name="сделать_рывок", description="Рывок к добыче")
+    async def сделать_рывок(self, inter: discord.Interaction):
+        if not await check_channel(inter, "охота"): return
+        await self.spawn_prey()
+        async with aiosqlite.connect(DB_FILE) as db:
+            async with db.execute("SELECT prey FROM hunt WHERE rowid=1") as cur:
+                prey_left = (await cur.fetchone())[0]
+        user = await get_user(inter.user.id)
+        chance = 30
+        if prey_left <= 0:
+            await inter.response.send_message(f"{inter.user.mention} пытается рывок, но добычи нет...")
+            return
+        success = random.randint(1,100) <= chance
+        if success:
+            gain = random.randint(20,555)
+            prey_left -= 1
+            await inter.response.send_message(f"{inter.user.mention} резко дергается вперед, шерсть вздыблена. Добыча не успевает моргнуть, как сильные лапы накрывают её. (+{gain} силы)")
+        else:
+            gain = random.randint(0,10)
+            await inter.response.send_message(f"{inter.user.mention} делает рывок, но добыча ускользает. (+{gain} силы)")
+        await update(inter.user.id,"strength", cap(user[1]+gain))
+        async with aiosqlite.connect(DB_FILE) as db:
+            await db.execute("UPDATE hunt SET prey=? WHERE rowid=1", (prey_left,))
+            await db.commit()
+
 # ---------------- Авто-пинг котиков ----------------
 async def monitor_status(bot):
     await bot.wait_until_ready()
@@ -231,10 +272,9 @@ async def monitor_status(bot):
 class MyBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix="!", intents=intents)
-        self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
-        # Синхронизация только на сервер
+        # Синхронизация команд на сервер
         await self.tree.sync(guild=discord.Object(id=GUILD_ID))
         # Авто-пинг
         self.loop.create_task(monitor_status(self))
@@ -246,6 +286,7 @@ async def setup():
     await bot.add_cog(ChannelSetup(bot))
     await bot.add_cog(RPCommands(bot))
     await bot.add_cog(CatCommands(bot))
+    await bot.add_cog(HuntCommands(bot))
 
 # ---------------- Запуск ----------------
 @bot.event
