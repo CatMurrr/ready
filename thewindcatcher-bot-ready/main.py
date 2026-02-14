@@ -62,13 +62,6 @@ async def get_user(uid):
         return await get_user(uid)
     return rows[0]
 
-async def set_channel(type_name, cid):
-    await db_exec("INSERT OR REPLACE INTO config(type,channel) VALUES(?,?)", (type_name, cid))
-
-async def get_channel(type_name):
-    r = await db_fetch("SELECT channel FROM config WHERE type=?", (type_name,))
-    return r[0][0] if r else None
-
 # ---------------- DATABASE ----------------
 async def init_db():
     async with aiosqlite.connect(DB) as db:
@@ -87,7 +80,7 @@ async def init_db():
         await db.execute("""
         CREATE TABLE IF NOT EXISTS config(
             type TEXT PRIMARY KEY,
-            channel INTEGER
+            channel TEXT
         )""")
 
         await db.execute("""
@@ -108,6 +101,37 @@ async def init_db():
                          (datetime.datetime.utcnow().isoformat(),))
         await db.commit()
 
+# ---------------- MULTI-CHANNEL SETUP ----------------
+async def add_channel(type_name, cid):
+    rows = await db_fetch("SELECT channel FROM config WHERE type=?", (type_name,))
+    channels = set(map(int, rows[0][0].split(","))) if rows else set()
+    channels.add(cid)
+    await db_exec("INSERT OR REPLACE INTO config(type,channel) VALUES(?,?)", 
+                  (type_name, ",".join(map(str, channels))))
+
+async def remove_channel(type_name, cid):
+    rows = await db_fetch("SELECT channel FROM config WHERE type=?", (type_name,))
+    if not rows: return
+    channels = set(map(int, rows[0][0].split(",")))
+    channels.discard(cid)
+    if channels:
+        await db_exec("INSERT OR REPLACE INTO config(type,channel) VALUES(?,?)",
+                      (type_name, ",".join(map(str, channels))))
+    else:
+        await db_exec("DELETE FROM config WHERE type=?", (type_name,))
+
+async def get_channels(type_name):
+    rows = await db_fetch("SELECT channel FROM config WHERE type=?", (type_name,))
+    return set(map(int, rows[0][0].split(","))) if rows else set()
+
+async def require_channel(inter, type_name):
+    allowed = await get_channels(type_name)
+    if inter.channel.id not in allowed:
+        mentions = " ".join(f"<#{c}>" for c in allowed) if allowed else "не назначено"
+        await inter.response.send_message(f"Дух молчит. Команда доступна только в: {mentions}", ephemeral=True)
+        return False
+    return True
+
 # ---------------- BOT ----------------
 class MyBot(commands.Bot):
     def __init__(self):
@@ -127,21 +151,24 @@ bot = MyBot()
 async def on_message(msg):
     if bot.user in msg.mentions:
         text = msg.content.lower()
-        if "котята" in text: await set_channel("kittens", msg.channel.id)
-        if "охота" in text: await set_channel("hunt", msg.channel.id)
-        if "лагерь" in text: await set_channel("camp", msg.channel.id)
-        if "состояние" in text: await set_channel("status", msg.channel.id)
-        if "секретик" in text: await set_channel("admin", msg.channel.id)
-        await msg.channel.send("Дух запомнил это место.")
+        # команды редактирования каналов
+        if "ред" in text:
+            parts = text.split()
+            if len(parts) >= 4:
+                type_name = parts[0]
+                channel = msg.channel_mentions[0].id if msg.channel_mentions else None
+                if channel:
+                    await add_channel(type_name, channel)
+                    await msg.channel.send(f"Дух запомнил {type_name}-канал <#{channel}>.")
+        else:
+            # обычная установка каналов через упоминание
+            if "котята" in text: await add_channel("kittens", msg.channel.id)
+            if "охота" in text: await add_channel("hunt", msg.channel.id)
+            if "лагерь" in text: await add_channel("camp", msg.channel.id)
+            if "состояние" in text: await add_channel("status", msg.channel.id)
+            if "секретик" in text: await add_channel("admin", msg.channel.id)
+            await msg.channel.send("Дух запомнил это место.")
     await bot.process_commands(msg)
-
-# ---------------- HELPER: REQUIRE CHANNEL ----------------
-async def require_channel(inter, type_name):
-    chan_id = await get_channel(type_name)
-    if chan_id and inter.channel.id != chan_id:
-        await inter.response.send_message(f"Дух молчит. Эта команда доступна только в <#{chan_id}>.", ephemeral=True)
-        return False
-    return True
 
 # ---------------- SAFE COMMANDS ----------------
 @bot.tree.command(guild=GUILD)
@@ -149,42 +176,12 @@ async def принюхаться(inter: discord.Interaction):
     gain = random.randint(1,15)
     u = await get_user(inter.user.id)
     await db_exec("UPDATE users SET orientation=? WHERE id=?", (cap300(u[2]+gain), inter.user.id))
-
     names = []
     async for m in inter.channel.history(limit=20):
         if m.author != bot.user:
             names.append(m.author.display_name)
     names = list(dict.fromkeys(names))[:5]
-
     await inter.response.send_message(f"{inter.user.mention} втягивает воздух. В памяти — {', '.join(names)}. (+{gain} ориентирования)")
-
-@bot.tree.command(guild=GUILD)
-async def прислушаться(inter: discord.Interaction):
-    gain = random.randint(1,15)
-    u = await get_user(inter.user.id)
-    await db_exec("UPDATE users SET orientation=? WHERE id=?", (cap300(u[2]+gain), inter.user.id))
-
-    msgs = []
-    async for m in inter.channel.history(limit=30):
-        if m.content:
-            msgs.append(m.content)
-    sample = random.choice(msgs)[:60] if msgs else "тишина..."
-
-    await inter.response.send_message(f"{inter.user.mention} замирает. В шорохах слышится: «{sample}» (+{gain})")
-
-@bot.tree.command(guild=GUILD)
-async def гоняться_за_листьями(inter: discord.Interaction):
-    gain = random.randint(1,15)
-    u = await get_user(inter.user.id)
-    await db_exec("UPDATE users SET strength=? WHERE id=?", (cap300(u[1]+gain), inter.user.id))
-    await inter.response.send_message(f"{inter.user.mention} {g(inter.user,'разогнался','разогналась')} по поляне. (+{gain} силы)")
-
-@bot.tree.command(guild=GUILD)
-async def ловить_шмеля(inter: discord.Interaction):
-    gain = random.randint(1,15)
-    u = await get_user(inter.user.id)
-    await db_exec("UPDATE users SET strength=?, mood=? WHERE id=?", (cap300(u[1]+gain), cap100(u[6]+10), inter.user.id))
-    await inter.response.send_message(f"{inter.user.mention} ловко щёлкает лапой. (+{gain} силы, +10% настроения)")
 
 # ---------------- KITTENS ----------------
 @bot.tree.command(guild=GUILD)
@@ -198,8 +195,7 @@ async def попить_молока(inter: discord.Interaction):
 async def кусать_хвостик_роженицы(inter: discord.Interaction):
     if not await require_channel(inter, "kittens"): return
     mothers = [m for m in inter.guild.members if any(r.name == ROLE_MOTHER for r in m.roles)]
-    if not mothers:
-        return await inter.response.send_message("Рожениц рядом нет.")
+    if not mothers: return await inter.response.send_message("Рожениц рядом нет.")
     target = random.choice(mothers)
     gain = random.randint(1,5)
     u = await get_user(inter.user.id)
@@ -216,14 +212,10 @@ async def поваляться_на_подстилке(inter: discord.Interactio
 # ---------------- HUNT ----------------
 async def hunt_attempt(inter, chance, success_range, fail_range, mood_change=0):
     if not await require_channel(inter, "hunt"): return
-
     prey = await db_fetch("SELECT prey FROM hunt WHERE rowid=1")
-    if prey[0][0] <= 0:
-        return await inter.response.send_message("Добычи больше нет.")
-
+    if prey[0][0] <= 0: return await inter.response.send_message("Добычи больше нет.")
     success = random.randint(1,100) <= chance
     u = await get_user(inter.user.id)
-
     if success:
         gain = random.randint(*success_range)
         await db_exec("UPDATE hunt SET prey=prey-1 WHERE rowid=1")
@@ -231,23 +223,17 @@ async def hunt_attempt(inter, chance, success_range, fail_range, mood_change=0):
     else:
         gain = random.randint(*fail_range)
         text = "Добыча ускользает..."
-
     new_strength = cap300(u[1]+gain if u[1]<300 else u[1])
     new_mood = cap100(u[6]+mood_change if success else u[6]-abs(mood_change))
     await db_exec("UPDATE users SET strength=?, mood=? WHERE id=?", (new_strength, new_mood, inter.user.id))
     await inter.response.send_message(f"{inter.user.mention} {text} (+{gain} силы)")
 
 @bot.tree.command(guild=GUILD)
-async def сделать_рывок(inter: discord.Interaction):
-    await hunt_attempt(inter,30,(20,55),(0,10),5)
-
+async def сделать_рывок(inter: discord.Interaction): await hunt_attempt(inter,30,(20,55),(0,10),5)
 @bot.tree.command(guild=GUILD)
-async def выследить_добычу(inter: discord.Interaction):
-    await hunt_attempt(inter,40,(15,25),(0,10),5)
-
+async def выследить_добычу(inter: discord.Interaction): await hunt_attempt(inter,40,(15,25),(0,10),5)
 @bot.tree.command(guild=GUILD)
-async def наступить_на_ветку(inter: discord.Interaction):
-    await hunt_attempt(inter,5,(5,10),(0,3),-10)
+async def наступить_на_ветку(inter: discord.Interaction): await hunt_attempt(inter,5,(5,10),(0,3),-10)
 
 # ---------------- CAMP ----------------
 @bot.tree.command(guild=GUILD)
@@ -287,8 +273,8 @@ async def spawn_prey():
     await bot.wait_until_ready()
     while True:
         await db_exec("UPDATE hunt SET prey=6 WHERE rowid=1")
-        ch = await get_channel("hunt")
-        if ch:
+        chans = await get_channels("hunt")
+        for ch in chans:
             c = bot.get_channel(ch)
             if c: await c.send("Кто-то шуршит в кустах...")
         await asyncio.sleep(3600)
@@ -303,15 +289,15 @@ async def spawn_herbs():
 async def monitor_status():
     await bot.wait_until_ready()
     while True:
-        ch = await get_channel("status")
-        if ch:
+        chans = await get_channels("status")
+        for ch in chans:
             c = bot.get_channel(ch)
+            if not c: continue
             rows = await db_fetch("SELECT id,hunger,thirst,mood FROM users")
             for uid,h,t,m in rows:
                 if h<10 or t<10 or m<10:
                     user = bot.get_user(uid)
-                    if user:
-                        await c.send(f"{user.mention} параметры критичны!")
+                    if user: await c.send(f"{user.mention} параметры критичны!")
         await asyncio.sleep(10800)
 
 # ---------------- READY ----------------
