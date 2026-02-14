@@ -391,7 +391,6 @@ async def admin_состояние(inter: discord.Interaction, target: discord.M
     new_val = max(0, min(300 if field in ["strength","orientation","medicine"] else 100, old_val + amount))
     await update(target.id, field, new_val)
     await inter.response.send_message(f"{target.display_name} — {field} изменено на {new_val}")
-
 # ---------------- Авто-пинг котиков с низкими параметрами ----------------
 async def monitor_status():
     await bot.wait_until_ready()
@@ -400,20 +399,27 @@ async def monitor_status():
             async with db.execute("SELECT id,hunger,thirst,mood FROM users") as cur:
                 rows = await cur.fetchall()
         for r in rows:
-            uid,hunger,thirst,mood = r
-            if hunger<10 or thirst<10 or mood<10:
+            uid, hunger, thirst, mood = r
+            if hunger < 10 or thirst < 10 or mood < 10:
                 user = bot.get_user(uid)
                 channel = None
                 async with aiosqlite.connect(DB_FILE) as db:
                     async with db.execute("SELECT channel FROM config WHERE type='состояние'") as cur:
                         row = await cur.fetchone()
-                        if row: channel = bot.get_channel(row[0])
+                        if row: 
+                            channel = bot.get_channel(row[0])
                 if user and channel:
                     await channel.send(f"{user.mention} срочно нужно повысить параметры!")
         await asyncio.sleep(10800)  # каждые 3 часа
 
-bot.loop.create_task(monitor_status())
+# ---------------- Класс бота с setup_hook ----------------
+class MyBot(commands.Bot):
+    async def setup_hook(self):
+        # Запускаем таск мониторинга после инициализации
+        self.loop.create_task(monitor_status())
 
+# ---------------- Создание бота ----------------
+bot = MyBot(command_prefix="!", intents=intents)
 
 # ---------------- Запуск бота ----------------
 @bot.event
